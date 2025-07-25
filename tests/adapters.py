@@ -588,7 +588,7 @@ def run_train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    import re    
+    import regex as re
     merge_list = [] 
     vocab = {}
     vocab_idx = 0
