@@ -588,4 +588,72 @@ def run_train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    raise NotImplementedError
+    import re    
+    merge_list = [] 
+    vocab = {}
+    vocab_idx = 0
+    for special in special_tokens:
+        vocab[vocab_idx] = special
+        vocab_idx += 1
+    for c in range(256):
+        vocab[vocab_idx] = chr(c)
+        vocab_idx += 1
+
+    PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+    code_dict = {}
+    class ByteMerges:
+        def __init__(self, word):
+            self.start_indexes = [i for i in range(len(word) + 1)]
+            self.word = word
+            self.count = 1
+
+        def incr(self):
+            self.count += 1
+
+    with open(input_path) as f:
+        for line in f:
+            words = re.findall(PAT, line.strip())
+            for word in words:
+                code = bytes(word)
+                if code not in code_dict:
+                    code_dict[code] = ByteMerges(word, code)
+                else:
+                    code_dict[code].incr()
+    
+    class MergeCount:
+        def __init__(self, range, first, second, code, word, idx, count):
+            self.range = range
+            self.first = first
+            self.second = second
+            self.word = word
+            self.count = count
+            self.change_list = {code: [idx]}
+
+        def add(self, code, idx, count):
+            self.count += count
+            if idx - self.change_list[code][0] > 1:
+                self.change_list[code].insert(0, idx)
+
+    for i in range(256 + len(special_tokens), vocab_size):
+        match_buffer = {}
+        for code in code_dict:
+            word_obj = code_dict[code]
+            indexes = word_obj.start_indexes
+            for idx in range(len(indexes) - 1):
+                byte_range = code[indexes[idx]: indexes[idx + 2]]
+                merge_first = code[indexes[idx]: indexes[idx + 1]]
+                merge_second = code[indexes[idx + 1]: indexes[idx + 2]]
+                if byte_range not in match_buffer:
+                    match_buffer[byte_range] = MergeCount(byte_range, merge_first, merge_second, code, word, idx, word_obj.count)
+                else:
+                    match_buffer[byte_range].add(code, idx, word_obj.count)
+        match_list = list(match_buffer.items)
+        match_list.sort(key=lambda x: (x[1].count, x[1].word), reverse=True)
+        sel_range = match_list[0][1]
+        merge_list.append((sel_range.first, sel_range.second))
+        vocab[i] = sel_range.range.decode("utf-8")
+        for code in sel_range.change_list:
+            for idx in sel_range.change_list[code]:
+                code_dict[code].start_indexes.pop(idx)
+    return (vocab, merge_list)
+
